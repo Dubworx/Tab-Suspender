@@ -212,7 +212,7 @@
 | # | Test Case | Priority | Type | Status | Note |
 |---|-----------|----------|------|--------|------|
 | 16.1 | Offscreen document sends heartbeat every 20 s | P2 | Unit | ✅ | `OffscreenDocument.Heartbeat.test.ts` |
-| 16.2 | Service worker does not sleep during active use | P2 | E2E | ❌ | |
+| 16.2 | Service worker does not sleep during active use | P2 | E2E | ✅ | `service-worker-alive.test.ts` |
 
 ---
 
@@ -224,7 +224,7 @@
 | 17.2 | "Suspend All Other Tabs" suspends all except current | P1 | E2E | ✅ | `bulk-tab-operations.test.ts` Phase A |
 | 17.3 | "Unsuspend Current Window" restores all tabs in window | P1 | E2E | ✅ | `bulk-tab-operations.test.ts` Phase B |
 | 17.4 | "Add to Whitelist" from menu saves pattern and syncs icon | P2 | E2E | ✅ | `whitelist-ignore.test.ts` (underlying API) |
-| 17.5 | Extension icon changes: normal / off / paused / whitelisted / ignored | P2 | E2E | ❌ | |
+| 17.5 | Extension icon changes: normal / off / paused / whitelisted / ignored | P2 | E2E | ✅ | `extension-icon.test.ts` |
 
 ---
 
@@ -234,15 +234,14 @@
 |----------|-------|-----------|-----------|---------------|
 | P0 (critical) | 13 | 13 | 0 | 0 |
 | P1 (high) | 47 | 46 | 0 | 1 |
-| P2 (medium) | 40 | 35 | 1 | 4 |
+| P2 (medium) | 40 | 37 | 1 | 2 |
 | P3 (low) | 3 | 3 | 0 | 0 |
-| **Total** | **103** | **97 (94%)** | **1 (1%)** | **5 (5%)** |
+| **Total** | **103** | **99 (96%)** | **1 (1%)** | **3 (3%)** |
 
 Remaining ❌ cases cannot be covered for the following reasons:
 - **11.5, 15.3** — logic lives inside `background.ts` which cannot be safely `require()`d in unit tests due to immediate side effects at load time (`chrome.runtime.getURL`, `new OffscreenDocumentProvider()`, etc.)
 - **11.6** — `resetToDefaults` function is not implemented anywhere in the codebase
 - **15.1** — feature code is commented out in the extension and does not execute
-- **16.2, 17.5** — require a running Chrome instance; E2E only
 
 ---
 
@@ -268,6 +267,8 @@ Remaining ❌ cases cannot be covered for the following reasons:
 | `pinned-tab-protection.test.ts` | 5.1, 5.2 | ✅ |
 | `hover-restore.test.ts` | 2.6 | ✅ |
 | `url-param-preserve.test.ts` | 2.9 | ✅ |
+| `service-worker-alive.test.ts` | 16.2 | ✅ |
+| `extension-icon.test.ts` | 17.5 | ✅ |
 
 ## Jest unit tests (files)
 
