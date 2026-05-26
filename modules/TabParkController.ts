@@ -404,4 +404,6 @@ async function discardTab(tabId) {
 // @ts-ignore
 if (typeof global !== "undefined") {
 	(global as any).discardTab = discardTab;
+	(global as any).closeTab = closeTab;
+	(global as any).parkTab = parkTab;
 }

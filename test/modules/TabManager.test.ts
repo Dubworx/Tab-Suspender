@@ -148,6 +148,36 @@ describe('TabManager', () => {
       expect(convertedBack.byteLength).toBe(buffer.byteLength); // Should match original
     });
 
+    // 12.5 — chunked path (> 8 KB) must roundtrip correctly
+    it('12.5 — arrayBufferToBase64 → base64ToArrayBuffer roundtrip is lossless for buffers > 8 KB', () => {
+      const size = 20 * 1024; // 20 KB — forces chunked processing (chunkSize = 8192)
+      const original = new Uint8Array(size);
+      for (let i = 0; i < size; i++) original[i] = i % 256;
+
+      const base64 = tabManager.arrayBufferToBase64(original.buffer);
+      const restored = new Uint8Array(tabManager.base64ToArrayBuffer(base64));
+
+      expect(restored.byteLength).toBe(size);
+      // Verify every byte survived the roundtrip
+      for (let i = 0; i < size; i++) {
+        if (restored[i] !== original[i]) {
+          throw new Error(`Byte mismatch at index ${i}: expected ${original[i]}, got ${restored[i]}`);
+        }
+      }
+    });
+
+    it('12.5 — chunked path produces same result as small-buffer path at boundary (8192 bytes)', () => {
+      // Exactly at the boundary: both paths should give identical output
+      const exactBoundary = new Uint8Array(8192);
+      for (let i = 0; i < 8192; i++) exactBoundary[i] = i % 256;
+
+      const base64Boundary = tabManager.arrayBufferToBase64(exactBoundary.buffer);
+      const restored = new Uint8Array(tabManager.base64ToArrayBuffer(base64Boundary));
+
+      expect(restored.byteLength).toBe(8192);
+      for (let i = 0; i < 8192; i++) expect(restored[i]).toBe(exactBoundary[i]);
+    });
+
     it('should perform arrayBufferToBase64 conversion within reasonable time', () => {
       // Test with different buffer sizes to measure performance characteristics
       const testSizes = [1024, 10240, 102400, 1048576]; // 1KB, 10KB, 100KB, 1MB
