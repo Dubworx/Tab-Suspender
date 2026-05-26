@@ -303,9 +303,11 @@ class TabManager {
 								tabInfo.markedForLoadSuspended = false;
 								tabInfo.originalUrlBeforeSuspend = null;
 
-								chrome.tabs.update(updatedTab.id, { url: url }).then(() => {
-									self.markTabParked(updatedTab);
-								}).catch(console.error);
+								setTimeout(() => {
+									chrome.tabs.update(updatedTab.id, { url: url }).then(() => {
+										self.markTabParked(updatedTab);
+									}).catch(console.error);
+								}, 0);
 							} else {
 								// Favicon not ready yet, try again
 								setTimeout(pollForFavicon, POLL_INTERVAL_MS);
