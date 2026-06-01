@@ -500,6 +500,55 @@ this.manifest = {
 			'text': 'Restore suspended tabs to normal web page on extention/browser startup'
 		},
 
+		/* Fork: robust-startup — large-session startup favicon refresh */
+		{
+			'tab': 'Startup',
+			'group': 'Large session startup',
+			'name': 'hybridStartupFaviconRefresh',
+			'type': 'checkbox',
+			'label': 'Hybrid favicon refresh on startup (recommended for large sessions)'
+		},
+		{
+			'tab': 'Startup',
+			'group': 'Large session startup',
+			'name': 'hybridStartupFaviconRefresh-description',
+			'type': 'description',
+			'text': 'On startup, eagerly refresh only the focused window\'s suspended tabs and backfill the rest gradually. Prevents flooding the service worker when you have many suspended tabs.'
+		},
+		{
+			'tab': 'Startup',
+			'group': 'Large session startup',
+			'name': 'startupEagerScope',
+			'type': 'listBox',
+			'options': [['activeWindow', 'Active window only (eager), backfill the rest'], ['all', 'All windows (eager) - original behaviour']],
+			'label': 'Eager favicon refresh scope: '
+		},
+		{
+			'tab': 'Startup',
+			'group': 'Large session startup',
+			'name': 'lazyFaviconRefreshConcurrency',
+			'type': 'slider',
+			'label': 'Backfill batch size: ',
+			'max': 20,
+			'min': 1,
+			'step': 1,
+			'display': true
+		},
+		{
+			'tab': 'Startup',
+			'group': 'Large session startup',
+			'name': 'useOffscreenKeepAlivePort',
+			'type': 'checkbox',
+			'label': 'Use offscreen keep-alive port (advanced hardening)'
+		},
+		{
+			'tab': 'Startup',
+			'group': 'Large session startup',
+			'name': 'enableParkedTabIdMigration',
+			'type': 'checkbox',
+			'label': 'Migrate suspended tabs from a previous extension id (one-time)'
+		},
+
 
 		{
 			'tab': 'Other',

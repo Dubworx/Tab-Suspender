@@ -33,6 +33,7 @@ try {
 		'modules/DbUtils.js',
 		'modules/OffscreenDocumentProvider.js',
 		'modules/SessionRestoreDetector.js',
+		'modules/StartupRefresh.js',
 		'background.js'
 	);
 } catch (e) {

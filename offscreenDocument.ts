@@ -17,12 +17,19 @@ setTimeout(startBatteryStatusNotifier, 3500);
 setTimeout(startServiceWorkerHeartbeat, 4000);
 setTimeout(initBackupSync, 5000);
 
+// Fork: robust-startup — optional keep-alive port (captured in onConnect below).
+let keepAlivePort: chrome.runtime.Port | null = null;
+
 function startServiceWorkerHeartbeat() {
 	console.log('Starting service worker heartbeat from offscreen document...');
 
 	// Send a heartbeat ping every 20 seconds to keep the service worker alive
 	// This works because handling messages resets the service worker's idle timer
 	setInterval(() => {
+		// Fork: when a keep-alive port is active, the SW is kept warm by it; skip the
+		// redundant sendMessage heartbeat. Otherwise the 20s sendMessage is the keep-alive of record.
+		if (keepAlivePort)
+			return;
 		chrome.runtime.sendMessage({
 			method: '[TS:offscreenDocument:heartbeat]'
 		}).catch((error) => {
@@ -35,6 +42,68 @@ function startServiceWorkerHeartbeat() {
 
 	console.log('Service worker heartbeat started');
 }
+
+// ============================================
+// Fork: PACED PARKED-TAB FAVICON BACKFILL QUEUE
+// Drains a queue of parked+faviconless tab ids in batches, messaging the SW per
+// batch to perform the actual reloads (MV3 single-owner). One setInterval is armed
+// while the queue is non-empty and torn down when it drains (no perpetual wakeup).
+// ============================================
+let lazyRefreshQueue: number[] = [];
+let lazyRefreshTimer: ReturnType<typeof setInterval> | null = null;
+let lazyRefreshBatch = 3;
+
+function startLazyRefresh(ids: number[], options: { delayMs: number, batch: number }) {
+	if (!Array.isArray(ids) || ids.length === 0)
+		return;
+
+	lazyRefreshQueue = lazyRefreshQueue.concat(ids);
+	lazyRefreshBatch = (options && typeof options.batch === 'number' && options.batch > 0) ? options.batch : 3;
+	const delayMs = (options && typeof options.delayMs === 'number' && options.delayMs > 0) ? options.delayMs : 250;
+
+	console.log(`[offscreenDocument] startLazyRefresh: queued ${ids.length} (total ${lazyRefreshQueue.length}), batch=${lazyRefreshBatch}, delayMs=${delayMs}`);
+
+	// Arm exactly ONE interval.
+	if (lazyRefreshTimer != null)
+		return;
+
+	lazyRefreshTimer = setInterval(() => {
+		if (lazyRefreshQueue.length === 0) {
+			if (lazyRefreshTimer != null) {
+				clearInterval(lazyRefreshTimer);
+				lazyRefreshTimer = null;
+			}
+			console.log('[offscreenDocument] lazyRefresh queue drained, interval cleared.');
+			return;
+		}
+
+		const tabIds = lazyRefreshQueue.splice(0, lazyRefreshBatch);
+		chrome.runtime.sendMessage({
+			method: '[TS:offscreenDocument:reloadParkedTab]',
+			tabIds
+		}).catch((error) => {
+			if (error.message !== 'Could not establish connection. Receiving end does not exist.')
+				console.error('[offscreenDocument] reloadParkedTab message error:', error);
+		});
+	}, delayMs);
+}
+
+// Fork: capture the optional keep-alive port from the SW.
+chrome.runtime.onConnect.addListener((port) => {
+	if (port.name === 'ts-offscreen-keepalive') {
+		console.log('[offscreenDocument] keep-alive port connected.');
+		keepAlivePort = port;
+		port.onMessage.addListener((message) => {
+			if (message && message.method === '[TS:offscreenDocument:startLazyRefresh]') {
+				startLazyRefresh(message.tabIds, { delayMs: message.delayMs, batch: message.batch });
+			}
+		});
+		port.onDisconnect.addListener(() => {
+			console.log('[offscreenDocument] keep-alive port disconnected.');
+			keepAlivePort = null;
+		});
+	}
+});
 
 function startBatteryStatusNotifier() {
 	try {
@@ -139,6 +208,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 			console.log(`[TS:offscreenDocument:startFormDatasCleanup]`);
 
 			void cleanup();
+
+		} else if (message.method === '[TS:offscreenDocument:startLazyRefresh]') {
+
+			// Fork: robust-startup — start/append the paced parked-tab favicon backfill queue.
+			startLazyRefresh(message.tabIds, { delayMs: message.delayMs, batch: message.batch });
 		}
 	}
 );

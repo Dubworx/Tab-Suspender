@@ -36,6 +36,20 @@ let isCharging = true;
 let startedAt = new Date().getTime();
 const firstTimeTabDiscardMap = {};
 
+/*
+ * Fork: robust-startup
+ * Set of parked+faviconless tab ids that were NOT eagerly reloaded at startup
+ * (background windows under hybrid 'activeWindow' scope). They are backfilled
+ * lazily — either on activation (TabManager.onActivated) or via the offscreen
+ * paced backfill queue. Exposed via global so TabManager / offscreen handler can read it.
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const pendingFaviconRefresh = new Set<number>();
+// @ts-ignore
+if (typeof global !== 'undefined') {
+	(global as any).pendingFaviconRefresh = pendingFaviconRefresh;
+}
+
 let whiteList: WhiteList;
 const offscreenDocumentProvider = new OffscreenDocumentProvider();
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -192,6 +206,8 @@ chrome.runtime.onInstalled.addListener(function(details) {
 	if (details.reason == 'install') {
 		if (debug)
 			console.log('This is a first install!');
+		// Fork: re-point any tabs parked under a foreign (prior) extension id to this id.
+		void migrateLegacyParkedTabs();
 	} else if (details.reason == 'update') {
 		const thisVersion = chrome.runtime.getManifest().version;
 		console.log('Updated from ' + details.previousVersion + ' to ' + thisVersion + '!'); /* Updated from 0.4.8.3 to 0.4.8.4! */
@@ -216,8 +232,94 @@ chrome.runtime.onInstalled.addListener(function(details) {
 				settings.set('screenshotQuality', 90);
 		}*/
 		//}, console.error);
+
+		// Fork: re-point any tabs parked under a foreign (prior) extension id to this id.
+		void migrateLegacyParkedTabs();
 	}
 });
+
+/*
+ * Fork: robust-startup — one-time migration of tabs parked under a FOREIGN extension id.
+ *
+ * When the build's extension id changes (e.g. store id -> pinned personal fork id, or a
+ * prior personal id), every existing parked tab still points at the old id's park.html and
+ * becomes a dead chrome-extension:// page. This re-points any such tab to THIS extension's
+ * park.html, preserving the query string VERBATIM (no re-encode). It does NOT reload tabs
+ * (chrome.tabs.update with a new url already navigates) and skips this extension's own id
+ * (idempotent — avoids a no-op update storm). Runs once, guarded by a storage flag.
+ *
+ * The foreign-id detection + verbatim url rebuild lives in StartupRefresh.planLegacyMigration
+ * (pure + unit-tested). This function only performs the throttled side effects.
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function migrateLegacyParkedTabs() {
+	try {
+		// settings may not be initialised yet on a fresh onInstalled; guard defensively.
+		if (typeof settings === 'undefined' || settings == null)
+			await new Promise(r => setTimeout(r, 1500));
+
+		if (typeof settings !== 'undefined' && settings != null) {
+			await settings.getOnStorageInitialized();
+			if (!await settings.get('enableParkedTabIdMigration')) {
+				console.log('[ParkedTabMigration] Disabled by settings, skipping.');
+				return;
+			}
+		}
+
+		const MIGRATION_DONE_KEY = 'parkedTabIdMigrationDone';
+		const stored = await chrome.storage.local.get([MIGRATION_DONE_KEY]);
+		if (stored && stored[MIGRATION_DONE_KEY]) {
+			console.log('[ParkedTabMigration] Already done, skipping.');
+			return;
+		}
+
+		const selfId = chrome.runtime.id;
+
+		// Build the configured legacy-id allowlist (informational; the foreign-id regex is
+		// the real mechanism and covers prior personal ids too).
+		let legacyIds: string[] = [];
+		if (typeof settings !== 'undefined' && settings != null) {
+			const raw = await settings.get('parkedTabMigrationLegacyIds');
+			legacyIds = StartupRefresh.parseLegacyIds(raw);
+		}
+		if (legacyIds.length === 0)
+			legacyIds = ['fiabciakcmgepblmdkmemdbbkilneeeh'];
+
+		const allTabs = await chrome.tabs.query({});
+
+		// Re-point tabs parked under a FOREIGN id (captured id !== this id); query VERBATIM.
+		const toMigrate = StartupRefresh.planLegacyMigration(
+			allTabs as unknown as { id: number, url: string, windowId: number, favIconUrl?: string }[],
+			selfId,
+			chrome.runtime.getURL('park.html')
+		);
+
+		console.log(`[ParkedTabMigration] selfId=${selfId}, allowlist=[${legacyIds.join(',')}], foreign parked tabs=${toMigrate.length}`);
+
+		// Throttle: batch by lazyFaviconRefreshConcurrency every lazyRefreshDelayMs.
+		let batch = 3;
+		let delayMs = 250;
+		if (typeof settings !== 'undefined' && settings != null) {
+			batch = await settings.get('lazyFaviconRefreshConcurrency');
+			delayMs = await settings.get('lazyRefreshDelayMs');
+		}
+
+		for (let i = 0; i < toMigrate.length; i += batch) {
+			const slice = toMigrate.slice(i, i + batch);
+			for (const item of slice) {
+				// item.url is already this extension's park.html + the VERBATIM query.
+				chrome.tabs.update(item.id, { url: item.url }).catch(console.error);
+			}
+			if (i + batch < toMigrate.length)
+				await new Promise(r => setTimeout(r, delayMs));
+		}
+
+		await chrome.storage.local.set({ [MIGRATION_DONE_KEY]: true });
+		console.log(`[ParkedTabMigration] Complete — migrated ${toMigrate.length} tab(s).`);
+	} catch (e) {
+		console.error('[ParkedTabMigration] Error:', e);
+	}
+}
 
 /**
  *
@@ -335,18 +437,40 @@ function start() {
 		await settings.getOnStorageInitialized();
 
 		const startNormalTabsDiscarted = await settings.get('startNormalTabsDiscarted');
+
+		/*
+		 * Fork: robust-startup — hybrid favicon refresh.
+		 * Read feature flags ONCE before the query (settings already init above).
+		 * With ~1000 parked tabs, unconditionally reloading every parked faviconless
+		 * tab floods the single MV3 service worker (each park.js re-run sendMessages back).
+		 * Instead, eagerly reload only the focused window's parked tabs and defer the rest
+		 * to a paced backfill (offscreen queue + on-activation drain in TabManager).
+		 */
+		const hybrid = await settings.get('hybridStartupFaviconRefresh');
+		const scope = await settings.get('startupEagerScope');
+		const focused = await chrome.windows.getLastFocused({ populate: false }).catch(() => null);
+		const focusedWindowId = focused != null ? focused.id : undefined;
+
 		/* Discard tabs */
 		chrome.tabs.query({ active: false/*, discarded: false*/ }, async function(tabs) {
 			console.log('Processing tabs after session restore - total tabs:', tabs.length);
 
+			/*
+			 * Fork: classify parked+faviconless tabs into eager (reload now) vs deferred
+			 * (backfill later) using the pure helper, then apply the side effects here.
+			 */
+			const refreshPlan = StartupRefresh.planHybridRefresh(
+				tabs as unknown as { id: number, url: string, windowId: number, favIconUrl?: string }[],
+				{ hybrid, scope, parkUrl, focusedWindowId }
+			);
+			for (const id of refreshPlan.eager)
+				chrome.tabs.reload(id).catch(console.error);
+			for (const id of refreshPlan.deferred)
+				pendingFaviconRefresh.add(id);
+
 			for (const i in tabs) {
 				if (tabs.hasOwnProperty(i)) {
-					if (tabs[i].url.indexOf(parkUrl) == 0) {
-						if (tabs[i].url.startsWith(parkUrl))
-							if (tabs[i].favIconUrl === null || tabs[i].favIconUrl == '') {
-								chrome.tabs.reload(tabs[i].id).catch(console.error);
-							}
-					}
+					// Parked-tab eager/deferred refresh handled above via refreshPlan.
 
 					if (tabs[i].url.indexOf(parkUrl) == -1) {
 						if (startNormalTabsDiscarted)
@@ -360,6 +484,39 @@ function start() {
 									}
 					}
 				}
+			}
+
+			/*
+			 * Fork: the active tab of the focused window is excluded by {active:false}.
+			 * Eagerly reload it too if it is a parked+faviconless tab so the visible tab
+			 * gets its favicon back immediately (only relevant under hybrid activeWindow).
+			 */
+			if (hybrid && scope === 'activeWindow' && focusedWindowId != null) {
+				chrome.tabs.query({ active: true, windowId: focusedWindowId }, function(activeTabs) {
+					for (const j in activeTabs) {
+						if (activeTabs.hasOwnProperty(j)) {
+							const t = activeTabs[j];
+							if (t.url != null && t.url.startsWith(parkUrl) &&
+								(t.favIconUrl === null || t.favIconUrl == '')) {
+								chrome.tabs.reload(t.id).catch(console.error);
+								pendingFaviconRefresh.delete(t.id);
+							}
+						}
+					}
+				});
+			}
+
+			/*
+			 * Fork: hand the deferred (background-window) parked tabs to the offscreen
+			 * paced-backfill queue so they refresh gradually without flooding the SW.
+			 */
+			if (hybrid && scope === 'activeWindow' && pendingFaviconRefresh.size > 0) {
+				const batch = await settings.get('lazyFaviconRefreshConcurrency');
+				const delayMs = await settings.get('lazyRefreshDelayMs');
+				offscreenDocumentProvider.enqueueLazyRefresh(
+					Array.from(pendingFaviconRefresh),
+					{ delayMs, batch }
+				).catch(console.error);
 			}
 		});
 	};

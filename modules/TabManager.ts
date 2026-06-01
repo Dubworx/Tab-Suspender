@@ -387,6 +387,9 @@ class TabManager {
 			if (trace)
 				console.trace(`Tab[${tabId}] removed`);
 
+			// Fork: drop closed tabs from the deferred favicon-refresh Set.
+			(global as any).pendingFaviconRefresh?.delete(tabId);
+
 			self.markTabClosed(tabId);
 
 			self.historyOpenerController.onRemoveTab(tabId);
@@ -443,6 +446,18 @@ class TabManager {
 
 				try {
 					if (TabManager.isTabParked(tab)) {
+						/*
+						 * Fork: robust-startup — lazy favicon backfill on activation.
+						 * Parked+faviconless tabs in background windows were deferred at
+						 * startup (pendingFaviconRefresh). When the user activates one,
+						 * reload it now to restore the favicon, then drop it from the Set.
+						 */
+						if ((global as any).pendingFaviconRefresh?.has(tab.id) &&
+							(tab.favIconUrl === null || tab.favIconUrl === '') &&
+							await settings.get('hybridStartupFaviconRefresh')) {
+							chrome.tabs.reload(tab.id).catch(console.error);
+							(global as any).pendingFaviconRefresh.delete(tab.id);
+						}
 						if (await settings.get('autoRestoreTab'))
 							self.unsuspendTab(tab);
 					} else if (!tab.discarded && await settings.get('animateTabIconSuspendTimeout'))

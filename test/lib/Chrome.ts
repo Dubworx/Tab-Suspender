@@ -66,12 +66,24 @@ const mockWindows = {
       tabs: [mockTab]
     };
     callback([mockWindow]);
-  })
+  }),
+  // Fork: robust-startup — focused window lookup used by startup hybrid refresh.
+  getLastFocused: jest.fn().mockResolvedValue({ id: 1 })
 };
 
 const mockRuntime = {
+  id: 'test',
   getURL: jest.fn((path: string) => `chrome-extension://test/${path}`),
-  sendMessage: jest.fn().mockResolvedValue(undefined)
+  sendMessage: jest.fn().mockResolvedValue(undefined),
+  // Fork: optional offscreen keep-alive port stubs.
+  connect: jest.fn().mockImplementation(() => ({
+    name: 'ts-offscreen-keepalive',
+    postMessage: jest.fn(),
+    onMessage: { addListener: jest.fn() },
+    onDisconnect: { addListener: jest.fn() },
+    disconnect: jest.fn()
+  })),
+  onConnect: { addListener: jest.fn() }
 };
 
 const mockScripting = {

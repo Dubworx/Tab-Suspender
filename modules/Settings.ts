@@ -18,6 +18,11 @@ const SETTINGS_TYPES = {
 	parkBgColor: STRING_TYPE,
 	screenshotCssStyle: STRING_TYPE,
 	restoreButtonView: STRING_TYPE,
+	// Fork: robust-startup
+	startupEagerScope: STRING_TYPE,
+	parkedTabMigrationLegacyIds: STRING_TYPE,
+	lazyFaviconRefreshConcurrency: NUMBER_TYPE,
+	lazyRefreshDelayMs: NUMBER_TYPE,
 };
 
 function GET_SETTINGS_TYPE(key: string): string {
@@ -71,6 +76,14 @@ class Settings {
 	// v2.0.0
 	localStorageMigrated: boolean;
 	localStorageFormDataCleaned: boolean;
+	// Fork: robust-startup
+	hybridStartupFaviconRefresh: boolean;
+	startupEagerScope: string;
+	lazyFaviconRefreshConcurrency: number;
+	lazyRefreshDelayMs: number;
+	useOffscreenKeepAlivePort: boolean;
+	enableParkedTabIdMigration: boolean;
+	parkedTabMigrationLegacyIds: string;
 }
 
 //type ISettingsFields = { [Property in keyof ISettings]?: boolean };
@@ -121,6 +134,14 @@ const DEFAULT_SETTINGS: Settings = {
 	// v2.0.0
 	localStorageMigrated: null,
 	localStorageFormDataCleaned: null,
+	// Fork: robust-startup — feature flags ship TRUE on this branch so the fork build works immediately
+	hybridStartupFaviconRefresh: true,
+	startupEagerScope: 'activeWindow', /* Available: activeWindow, all */
+	lazyFaviconRefreshConcurrency: 3,
+	lazyRefreshDelayMs: 250,
+	useOffscreenKeepAlivePort: false, /* optional hardening; default off */
+	enableParkedTabIdMigration: true,
+	parkedTabMigrationLegacyIds: 'fiabciakcmgepblmdkmemdbbkilneeeh', /* comma/newline-joined; consumer splits on /[\n,]/ */
 };
 
 // @ts-ignore

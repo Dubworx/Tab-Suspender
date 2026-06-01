@@ -165,6 +165,23 @@ class BGMessageListener {
 				// Send acknowledgment back to maintain bidirectional communication
 				sendResponse({ method: '[TS:offscreenDocument:heartbeatAck]', timestamp: Date.now() });
 				return true; // For async sendResponse()
+			} else if (request.method === '[TS:offscreenDocument:reloadParkedTab]') {
+				// Fork: robust-startup — paced backfill batch from the offscreen queue.
+				// Re-validate each id (it may have been activated/closed/navigated since
+				// it was enqueued) and reload only still-parked, still-faviconless tabs.
+				void (async () => {
+					const ids: number[] = Array.isArray(request.tabIds) ? request.tabIds : [];
+					for (const id of ids) {
+						const t = await chrome.tabs.get(id).catch(() => null);
+						if (t != null && t.url != null && TabManager.isTabParked(t) &&
+							(t.favIconUrl === null || t.favIconUrl === '')) {
+							chrome.tabs.reload(id).catch(console.error);
+						}
+						(globalThis as any).pendingFaviconRefresh?.delete(id);
+					}
+					sendResponse({ done: true });
+				})();
+				return true; // For async sendResponse()
 			} else if (request.method === '[TS:offscreenDocument:getSuspendedTabs]') {
 				// Return list of all suspended tabs for backup sync
 				void (async () => {

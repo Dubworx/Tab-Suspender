@@ -1,4 +1,6 @@
-const publicExtensionUrl = 'chrome-extension://fiabciakcmgepblmdkmemdbbkilneeeh/park.html';
+// Fork: derive from the actual extension id (was hardcoded to the store id) so
+// parked-tab detection works under a forked/pinned extension id too.
+const publicExtensionUrl = chrome.runtime.getURL('park.html');
 const debugTabsInfo = false;
 
 // @ts-ignore
