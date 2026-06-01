@@ -388,7 +388,10 @@ class TabManager {
 				console.trace(`Tab[${tabId}] removed`);
 
 			// Fork: drop closed tabs from the deferred favicon-refresh Set.
-			(global as any).pendingFaviconRefresh?.delete(tabId);
+			// Use `globalThis` (declared in the SW); a bare `global` would throw
+			// ReferenceError in the classic service worker — `?.` does NOT guard an
+			// undeclared identifier, only null/undefined values.
+			(globalThis as any).pendingFaviconRefresh?.delete(tabId);
 
 			self.markTabClosed(tabId);
 
@@ -447,19 +450,31 @@ class TabManager {
 				try {
 					if (TabManager.isTabParked(tab)) {
 						/*
-						 * Fork: robust-startup — lazy favicon backfill on activation.
-						 * Parked+faviconless tabs in background windows were deferred at
-						 * startup (pendingFaviconRefresh). When the user activates one,
-						 * reload it now to restore the favicon, then drop it from the Set.
+						 * Fork: robust-startup — auto-restore is the CORE behavior here, so
+						 * evaluate it FIRST. The lazy favicon backfill below is best-effort and
+						 * must never be able to abort auto-restore (it is isolated in its own
+						 * try/catch). Read the Set via `globalThis` — a bare `global` would throw
+						 * ReferenceError in the classic SW (`?.` does not guard an undeclared id).
 						 */
-						if ((global as any).pendingFaviconRefresh?.has(tab.id) &&
-							(tab.favIconUrl === null || tab.favIconUrl === '') &&
-							await settings.get('hybridStartupFaviconRefresh')) {
-							chrome.tabs.reload(tab.id).catch(console.error);
-							(global as any).pendingFaviconRefresh.delete(tab.id);
-						}
 						if (await settings.get('autoRestoreTab'))
 							self.unsuspendTab(tab);
+
+						/*
+						 * Fork: lazy favicon backfill on activation. Parked+faviconless tabs in
+						 * background windows were deferred at startup (pendingFaviconRefresh).
+						 * When the user activates one, reload it now to restore the favicon,
+						 * then drop it from the Set.
+						 */
+						try {
+							if ((globalThis as any).pendingFaviconRefresh?.has(tab.id) &&
+								(tab.favIconUrl === null || tab.favIconUrl === '') &&
+								await settings.get('hybridStartupFaviconRefresh')) {
+								chrome.tabs.reload(tab.id).catch(console.error);
+								(globalThis as any).pendingFaviconRefresh.delete(tab.id);
+							}
+						} catch (backfillErr) {
+							console.error('Favicon backfill on activation failed:', backfillErr);
+						}
 					} else if (!tab.discarded && await settings.get('animateTabIconSuspendTimeout'))
 						chrome.tabs.sendMessage(activeInfo.tabId, {
 							method: '[AutomaticTabCleaner:highliteFavicon]',

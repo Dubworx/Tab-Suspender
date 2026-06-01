@@ -26,10 +26,11 @@ function startServiceWorkerHeartbeat() {
 	// Send a heartbeat ping every 20 seconds to keep the service worker alive
 	// This works because handling messages resets the service worker's idle timer
 	setInterval(() => {
-		// Fork: when a keep-alive port is active, the SW is kept warm by it; skip the
-		// redundant sendMessage heartbeat. Otherwise the 20s sendMessage is the keep-alive of record.
-		if (keepAlivePort)
-			return;
+		// Fork: the 20s sendMessage is the keep-alive OF RECORD and must ALWAYS fire.
+		// A quiescent connect port does NOT reliably reset the MV3 idle timer, so the
+		// optional keep-alive port is additive hardening only — never a replacement for
+		// this heartbeat. (Previously this early-returned when keepAlivePort was set,
+		// which could let the SW die at the 30s idle limit once the queue drained.)
 		chrome.runtime.sendMessage({
 			method: '[TS:offscreenDocument:heartbeat]'
 		}).catch((error) => {

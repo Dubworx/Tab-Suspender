@@ -41,14 +41,17 @@ const firstTimeTabDiscardMap = {};
  * Set of parked+faviconless tab ids that were NOT eagerly reloaded at startup
  * (background windows under hybrid 'activeWindow' scope). They are backfilled
  * lazily — either on activation (TabManager.onActivated) or via the offscreen
- * paced backfill queue. Exposed via global so TabManager / offscreen handler can read it.
+ * paced backfill queue. Exposed via globalThis so TabManager / offscreen handler can read it.
+ *
+ * NOTE: must use `globalThis` (NOT `global`). The MV3 service worker is a classic worker
+ * (worker.js -> importScripts, no "type":"module"); there is NO `global` binding there —
+ * `global` is a Node-ism. `globalThis` is defined in the SW, in jsdom, and in Node, so the
+ * Set is published in production and the three readers (here, TabManager, BGMessageListener)
+ * all operate on the SAME live Set. Publish unconditionally — no `typeof` guard needed.
  */
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const pendingFaviconRefresh = new Set<number>();
-// @ts-ignore
-if (typeof global !== 'undefined') {
-	(global as any).pendingFaviconRefresh = pendingFaviconRefresh;
-}
+(globalThis as any).pendingFaviconRefresh = pendingFaviconRefresh;
 
 let whiteList: WhiteList;
 const offscreenDocumentProvider = new OffscreenDocumentProvider();
@@ -239,6 +242,18 @@ chrome.runtime.onInstalled.addListener(function(details) {
 });
 
 /*
+ * Fork: robust-startup — resume an interrupted migration on SW restart.
+ * onInstalled fires only on install/update, NOT when the service worker is woken back up.
+ * If the migration loop was interrupted (SW evicted / browser quit mid-loop), the done-flag
+ * was deliberately left unset (see migrateLegacyParkedTabs). onStartup re-runs migration,
+ * which re-derives remaining work from a fresh chrome.tabs.query and no-ops once the flag is
+ * set, so this is idempotent and closes the partial-migration gap.
+ */
+chrome.runtime.onStartup.addListener(function() {
+	void migrateLegacyParkedTabs();
+});
+
+/*
  * Fork: robust-startup — one-time migration of tabs parked under a FOREIGN extension id.
  *
  * When the build's extension id changes (e.g. store id -> pinned personal fork id, or a
@@ -314,8 +329,27 @@ async function migrateLegacyParkedTabs() {
 				await new Promise(r => setTimeout(r, delayMs));
 		}
 
-		await chrome.storage.local.set({ [MIGRATION_DONE_KEY]: true });
-		console.log(`[ParkedTabMigration] Complete — migrated ${toMigrate.length} tab(s).`);
+		/*
+		 * Fork: robust-startup — make migration CRASH-RESUMABLE.
+		 * The throttled loop above can run for tens of seconds with a large session; if the
+		 * MV3 service worker is evicted mid-loop the done-flag must NOT be written (otherwise
+		 * onInstalled won't fire on SW restart and the remaining foreign tabs stay dead).
+		 * Re-derive remaining work from a FRESH query and only mark done when ZERO foreign
+		 * park.html tabs remain. If some remain (we were interrupted, or chrome.tabs.update
+		 * has not settled yet), leave the flag unset so onStartup can finish the job later.
+		 */
+		const remainingTabs = await chrome.tabs.query({});
+		const stillForeign = StartupRefresh.planLegacyMigration(
+			remainingTabs as unknown as { id: number, url: string, windowId: number, favIconUrl?: string }[],
+			selfId,
+			chrome.runtime.getURL('park.html')
+		);
+		if (stillForeign.length === 0) {
+			await chrome.storage.local.set({ [MIGRATION_DONE_KEY]: true });
+			console.log(`[ParkedTabMigration] Complete — migrated ${toMigrate.length} tab(s); no foreign tabs remain.`);
+		} else {
+			console.log(`[ParkedTabMigration] Partial — ${stillForeign.length} foreign tab(s) still remain; done-flag NOT set, will resume on next startup.`);
+		}
 	} catch (e) {
 		console.error('[ParkedTabMigration] Error:', e);
 	}
