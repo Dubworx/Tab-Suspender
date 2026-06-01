@@ -300,7 +300,12 @@ async function migrateLegacyParkedTabs() {
 		if (legacyIds.length === 0)
 			legacyIds = ['fiabciakcmgepblmdkmemdbbkilneeeh'];
 
-		const allTabs = await chrome.tabs.query({});
+		// Fork FIX (robust-startup): BULK migration DISABLED. Re-pointing every parked tab
+		// woke a renderer per tab and overwhelmed Brave on large (~1000-tab) sessions, crashing
+		// it. Migration is now LAZY — a tab is re-pointed only when the user activates it
+		// (already awake => no renderer storm). See TabManager.ts onActivated. Leaving this list
+		// empty makes the throttled loop below a no-op; the done-flag stays unset (harmless).
+		const allTabs: chrome.tabs.Tab[] = [];
 
 		// Re-point tabs parked under a FOREIGN id (captured id !== this id); query VERBATIM.
 		const toMigrate = StartupRefresh.planLegacyMigration(

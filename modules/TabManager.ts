@@ -447,6 +447,29 @@ class TabManager {
 
 				self.markTabActivated(tab);
 
+				/*
+				 * Fork: robust-startup — LAZY one-time id migration.
+				 * If this just-activated tab is parked under a FOREIGN extension id (a prior/store
+				 * id whose park page is dead under this build), re-point ONLY this single tab —
+				 * which is already awake because it was just activated — to our own park.html,
+				 * preserving the query string VERBATIM. No bulk query/update => never a renderer
+				 * storm. Self-id tabs and non-park tabs are left untouched. Isolated in try/catch
+				 * so it can never abort normal activation handling.
+				 */
+				try {
+					if (typeof tab.url === 'string' && settings != null &&
+						await settings.get('enableParkedTabIdMigration')) {
+						const foreignParkMatch = /^chrome-extension:\/\/([a-p]{32})\/park\.html\?/.exec(tab.url);
+						if (foreignParkMatch != null && foreignParkMatch[1] !== chrome.runtime.id) {
+							const migratedUrl = chrome.runtime.getURL('park.html') + tab.url.slice(tab.url.indexOf('?'));
+							chrome.tabs.update(tab.id, { url: migratedUrl }).catch(console.error);
+							return; // tab is navigating to our park page; nothing else to do this activation
+						}
+					}
+				} catch (lazyMigErr) {
+					console.error('[ParkedTabMigration:lazy] activation re-point failed:', lazyMigErr);
+				}
+
 				try {
 					if (TabManager.isTabParked(tab)) {
 						/*
