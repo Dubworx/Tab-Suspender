@@ -2,7 +2,8 @@
     "manifest_version": 3,
 	"name": "__MSG_extName__",
 	"short_name": "Tab Suspender",
-    "version": "2.0.13-fork.1",
+    "version": "2.0.13",
+    "version_name": "2.0.13-fork.1",
     "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwFZio76dabl/Ax0a3QLOzI9bd4c+IJQUC3Ye2HwXYE1qdaYXNNWJLKgFEzFgLMpq51ZNRrnV3grY02TSMAqh6dyqhzn0BWnGnbjkMK6jOaMLIhXLiHn3Yemj+ZFzhCYBs3BTVcQinB+NOyhZuyI6wN8uQ9PiQnL68QA5oCkCGaYQdRqzRpwi8HCz+x+bd/uKTHmAQ0GuKxBgB3YqVRpGF33nKHZh7KoP6gLA76uena/pXmZSe3WxCfsxcK9dm9C83pQZbb15HOm0+QpTpq1tfIAQN1OFkAuhxN8xnOJpFzqi07FQywp2YLWqcoQEMZv9GmHclPp4kTjv6uXfBv6mNwIDAQAB",
     "minimum_chrome_version": "109",
 
